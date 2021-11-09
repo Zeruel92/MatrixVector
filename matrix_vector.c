@@ -1,3 +1,7 @@
+/*
+ * Matrix Vector product with Checkerboard Decomposition
+ */
+
 #include <stdio.h>
 #include <mpi.h>
 #include <stdlib.h>
@@ -165,6 +169,7 @@ int main(int argc, char** argv){
     }
 #endif
 
+    MPI_Type_free(mpi_matrix_dims_t);
     free(matrix),matrix=NULL;
     free(matrix_storage),matrix_storage=NULL;
     free(vector),vector=NULL;
