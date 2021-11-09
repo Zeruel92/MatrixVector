@@ -20,7 +20,7 @@ int main(int argc, char** argv){
     int processes, rank;
 
     FILE* matrix_file;
-    int size;
+    int local_rows,local_cols;
     int **matrix=NULL;
     int *matrix_storage=NULL;
     int *vector=NULL;
@@ -32,7 +32,13 @@ int main(int argc, char** argv){
     float elapsed;
     int *gather_counts=NULL;
     int *gather_displacements=NULL;
-
+    MPI_Comm grid_comm;
+    MPI_Comm row_comm;
+    MPI_Comm column_comm;
+    int cart_dims = 2;
+    int cart_size[2]={0,0};
+    int wraparaound[2]={0,0};
+    int grid_coords[2];
     matrix_dims_t dims;
 
 #ifdef _DEBUG
@@ -42,6 +48,13 @@ int main(int argc, char** argv){
     MPI_Init(&argc,&argv);
     MPI_Comm_rank(MPI_COMM_WORLD,&rank);
     MPI_Comm_size(MPI_COMM_WORLD,&processes);
+
+    MPI_Dims_create(processes,cart_dims,cart_size);
+    MPI_Cart_create(MPI_COMM_WORLD,cart_dims,cart_size,wraparaound,1,&grid_comm);
+
+    MPI_Cart_coords (grid_comm, rank, cart_dims, grid_coords);
+    MPI_Comm_split (grid_comm, grid_coords[1], grid_coords[0], &column_comm);
+    MPI_Comm_split (grid_comm, grid_coords[0], grid_coords[1], &row_comm);
 
     // Creating MPI Data Type for matrix dims
     MPI_Datatype mpi_matrix_dims_t;
@@ -70,24 +83,25 @@ int main(int argc, char** argv){
     MPI_Bcast(&dims,1,mpi_matrix_dims_t,processes-1,MPI_COMM_WORLD);
 
     //Preparing array
-    size = BLOCK_SIZE(rank, processes, dims.rows);
-    matrix = (int **) malloc(size * sizeof(int *));
+    local_rows = BLOCK_SIZE(rank, processes, dims.rows);
+    local_cols = BLOCK_SIZE(rank,processes,dims.cols);
+    matrix = (int **) malloc(local_rows * sizeof(int *));
     if(matrix == NULL){
         fprintf(stderr, "Failed allocating matrix\n");
         MPI_Abort(MPI_COMM_WORLD, -1);
     }
 
-    matrix_storage = (int *) malloc(size*dims.cols*sizeof(int));
+    matrix_storage = (int *) malloc(local_rows*local_cols*sizeof(int));
     if(matrix_storage == NULL){
         fprintf(stderr, "Failed allocating matrix_storage\n");
         MPI_Abort(MPI_COMM_WORLD, -1);
     }
-    for(int i=0; i<size; i++){
+    for(int i=0; i<local_rows; i++){
         matrix[i] = &matrix_storage[i*dims.cols];
     }
 
     vector = (int *) malloc(dims.cols* sizeof(int));
-    temp_vector = (int *) calloc(size,sizeof(int));
+    temp_vector = (int *) calloc(local_rows,sizeof(int));
     if(rank==processes-1) output_vector = (int *) malloc(dims.rows*sizeof(int));
 
     //Preparing gather param array
@@ -104,18 +118,20 @@ int main(int argc, char** argv){
     //Loading array
     if(rank == processes-1){
         for(int i = 0; i < processes-1; i++) {
-            int local_size = BLOCK_SIZE(i, processes, dims.rows);
-            for (int j = 0; j < local_size * dims.cols; j++)
+            int plocal_rows = BLOCK_SIZE(i, processes, dims.rows);
+            int plocal_cols = BLOCK_SIZE(i, processes,dims.cols);
+
+            for (int j = 0; j < plocal_rows * plocal_cols; j++)
                 fscanf(matrix_file, "%d", &matrix_storage[j]);
-            if (processes > 1) MPI_Irsend(matrix_storage, local_size * dims.cols, MPI_INT, i, 0, MPI_COMM_WORLD, &request);
+            if (processes > 1) MPI_Irsend(matrix_storage, plocal_rows * plocal_cols, MPI_INT, i, 0, MPI_COMM_WORLD, &request);
         }
-        for (int i = 0; i < size * dims.cols; i++)
+        for (int i = 0; i < local_rows * dims.cols; i++)
             fscanf(matrix_file, "%d", &matrix_storage[i]);
-        for (int i = 0; i < dims.cols; i++){
+        for (int i = 0; i < local_cols; i++){
             fscanf(matrix_file, "%d", &vector[i]);
         }
     } else {
-        MPI_Recv(matrix_storage, size * dims.cols, MPI_INT, processes - 1, 0, MPI_COMM_WORLD, &status);
+        MPI_Recv(matrix_storage, local_rows * local_cols, MPI_INT, processes - 1, 0, MPI_COMM_WORLD, &status);
     }
     MPI_Bcast(vector,dims.cols,MPI_INT,processes-1,MPI_COMM_WORLD);
 
@@ -126,7 +142,7 @@ int main(int argc, char** argv){
     } else {
         MPI_Recv(&debug, 1, MPI_INT, (rank - 1) % processes, 1, MPI_COMM_WORLD, &status);
     }
-    for (int i = 0; i < size; i++) {
+    for (int i = 0; i < local_rows; i++) {
         for (int k = 0; k < dims.cols; k++) {
             fprintf(stdout, "%d ", matrix[i][k]);
             fflush(stdout);
@@ -146,18 +162,19 @@ int main(int argc, char** argv){
     MPI_Barrier(MPI_COMM_WORLD);
     elapsed=-MPI_Wtime();
     for (int iterations = 0; iterations < MAX_ITERATIONS; iterations++) {
-        for(int i =0;i<size;i++){
+        for(int i =0;i<local_rows;i++){
             for(int j=0; j<dims.cols; j++){
                 temp_vector[i]+= matrix[i][j] * vector[j];
             }
         }
-        MPI_Gatherv(temp_vector,size,MPI_INT,output_vector,gather_counts,gather_displacements,MPI_INT,processes-1,MPI_COMM_WORLD);
+        MPI_Gatherv(temp_vector,local_rows,MPI_INT,output_vector,gather_counts,gather_displacements,MPI_INT,processes-1,MPI_COMM_WORLD);
     }
 
 
     MPI_Barrier(MPI_COMM_WORLD);
     elapsed+=MPI_Wtime();
     elapsed/=MAX_ITERATIONS;
+    MPI_Type_free(mpi_matrix_dims_t);
     MPI_Finalize();
 
 #ifdef _DEBUG
@@ -169,7 +186,7 @@ int main(int argc, char** argv){
     }
 #endif
 
-    MPI_Type_free(mpi_matrix_dims_t);
+
     free(matrix),matrix=NULL;
     free(matrix_storage),matrix_storage=NULL;
     free(vector),vector=NULL;
