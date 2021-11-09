@@ -22,6 +22,8 @@ int main(int argc, char** argv){
     MPI_Request request;
     MPI_Status status;
     float elapsed;
+    int *gather_counts=NULL;
+    int *gather_displacements=NULL;
 
 #ifdef _DEBUG
     int debug =1;
@@ -63,7 +65,19 @@ int main(int argc, char** argv){
 
     vector = (int *) malloc(n* sizeof(int));
     temp_vector = (int *) calloc(size,sizeof(int));
-    if(!rank) output_vector = (int *) malloc(m*sizeof(int));
+    if(rank==processes-1) output_vector = (int *) malloc(m*sizeof(int));
+
+    //Preparing gather param array
+
+    if(rank == processes-1){
+        gather_counts = (int *) malloc(processes*sizeof(int));
+        gather_displacements = (int *) malloc(processes*sizeof(int));
+        for(int i =0;i<processes;i++){
+            gather_counts[i]= BLOCK_SIZE(i,processes,m);
+            gather_displacements[i]= BLOCK_LOW(i,processes,m);
+        }
+    }
+
     //Loading array
     if(rank == processes-1){
         for(int i = 0; i < processes-1; i++) {
@@ -114,7 +128,7 @@ int main(int argc, char** argv){
                 temp_vector[i]+= matrix[i][j] * vector[j];
             }
         }
-        MPI_Gather(temp_vector,size,MPI_INT,output_vector,m,MPI_INT,0,MPI_COMM_WORLD);
+        MPI_Gatherv(temp_vector,size,MPI_INT,output_vector,gather_counts,gather_displacements,MPI_INT,processes-1,MPI_COMM_WORLD);
     }
 
 
@@ -124,7 +138,7 @@ int main(int argc, char** argv){
     MPI_Finalize();
 
 #ifdef _DEBUG
-    if(!rank){
+    if(rank == processes-1){
         fprintf(stdout,"VECTOR:\n");
         for(int i = 0; i <m; i++)
             fprintf(stdout,"%d ",output_vector[i]);
@@ -136,10 +150,13 @@ int main(int argc, char** argv){
     free(matrix_storage),matrix_storage=NULL;
     free(vector),vector=NULL;
     free(temp_vector), temp_vector=NULL;
-    if(!rank)free(output_vector), output_vector=NULL;
-    if(rank==processes-1) fclose(matrix_file);
-
-    if(!rank) fprintf(stdout,"Processes %d Iterations: %d Time: %f",processes,MAX_ITERATIONS,elapsed);
+    if(rank==processes-1){
+        free(output_vector), output_vector=NULL;
+        free(gather_displacements),gather_displacements=NULL;
+        free(gather_counts),gather_counts=NULL;
+        fclose(matrix_file);
+    }
+    if(!rank) fprintf(stdout,"Processes %d Iterations: %d Time: %f\n",processes,MAX_ITERATIONS,elapsed);
 
     return 0;
 }
