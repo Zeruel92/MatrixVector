@@ -21,6 +21,7 @@ int main(int argc, char** argv){
     int **matrix=NULL;
     int *matrix_storage=NULL;
     int *vector=NULL;
+    int *output_vector=NULL;
 
     MPI_Request request;
     MPI_Status status;
@@ -65,7 +66,7 @@ int main(int argc, char** argv){
         matrix[i] = &matrix_storage[i*n];
     }
 
-    vector = (int *) malloc(m* sizeof(int));
+    vector = (int *) malloc(n* sizeof(int));
 
     //Loading array
     if(rank == processes-1){
@@ -77,13 +78,13 @@ int main(int argc, char** argv){
         }
         for (int i = 0; i < size * n; i++)
             fscanf(matrix_file, "%d", &matrix_storage[i]);
-        for (int i = 0; i < m; i++){
+        for (int i = 0; i < n; i++){
             fscanf(matrix_file, "%d", &vector[i]);
         }
     } else {
         MPI_Recv(matrix_storage, size * n, MPI_INT, processes - 1, 0, MPI_COMM_WORLD, &status);
     }
-    MPI_Bcast(vector,m,MPI_INT,processes-1,MPI_COMM_WORLD);
+    MPI_Bcast(vector,n,MPI_INT,processes-1,MPI_COMM_WORLD);
 
 #ifdef _DEBUG
     if (!rank) {
@@ -103,7 +104,7 @@ int main(int argc, char** argv){
     if (processes > 1) MPI_Send(&debug, 1, MPI_INT, (rank + 1) % processes, 1, MPI_COMM_WORLD);
     if(!rank){
         fprintf(stdout,"VECTOR:\n");
-        for(int i = 0; i <m; i++)
+        for(int i = 0; i <n; i++)
             fprintf(stdout,"%d ",vector[i]);
         fprintf(stdout,"\n");
     }
@@ -111,7 +112,13 @@ int main(int argc, char** argv){
 
     MPI_Barrier(MPI_COMM_WORLD);
     elapsed=-MPI_Wtime();
-    for (int iterations = 0; iterations < MAX_ITERATIONS; iterations++) {}
+    for (int iterations = 0; iterations < MAX_ITERATIONS; iterations++) {
+        for(int i =0;i<size;i++){
+            for(int j=0; j<n; j++){
+
+            }
+        }
+    }
 
 
     MPI_Barrier(MPI_COMM_WORLD);
@@ -137,7 +144,7 @@ int main(int argc, char** argv){
     if (processes > 1) MPI_Send(&debug, 1, MPI_INT, (rank + 1) % processes, 1, MPI_COMM_WORLD);
     if(!rank){
         fprintf(stdout,"VECTOR:\n");
-        for(int i = 0; i <m; i++)
+        for(int i = 0; i <n; i++)
             fprintf(stdout,"%d ",vector[i]);
         fprintf(stdout,"\n");
     }
