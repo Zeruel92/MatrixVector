@@ -12,7 +12,7 @@ int main(int argc, char** argv){
     int processes, rank;
 
     FILE* matrix_file;
-    int n,m,size,low_value;
+    int n,m,size;
     int **matrix=NULL;
     int *matrix_storage=NULL;
     int *vector=NULL;
@@ -46,7 +46,6 @@ int main(int argc, char** argv){
 
     //Preparing array
     size = BLOCK_SIZE(rank, processes, m);
-    low_value = BLOCK_LOW(rank, processes, m);
     matrix = (int **) malloc(size * sizeof(int *));
     if(matrix == NULL){
         fprintf(stderr, "Failed allocating matrix\n");
