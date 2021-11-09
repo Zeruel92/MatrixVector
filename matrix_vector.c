@@ -86,7 +86,6 @@ int main(int argc, char** argv){
     MPI_Bcast(vector,m,MPI_INT,processes-1,MPI_COMM_WORLD);
 
 #ifdef _DEBUG
-
     if (!rank) {
         fprintf(stdout, "INPUT MATRIX:\n");
         fflush(stdout);
@@ -106,8 +105,10 @@ int main(int argc, char** argv){
         fprintf(stdout,"VECTOR:\n");
         for(int i = 0; i <m; i++)
             fprintf(stdout,"%d ",vector[i]);
+        fprintf(stdout,"\n");
     }
 #endif
+
     MPI_Barrier(MPI_COMM_WORLD);
     elapsed=-MPI_Wtime();
     for (int iterations = 0; iterations < MAX_ITERATIONS; iterations++) {}
@@ -117,6 +118,30 @@ int main(int argc, char** argv){
     elapsed+=MPI_Wtime();
     elapsed/=MAX_ITERATIONS;
     MPI_Finalize();
+
+#ifdef _DEBUG
+    if (!rank) {
+        fprintf(stdout, "OUTPUT MATRIX:\n");
+        fflush(stdout);
+    } else {
+        MPI_Recv(&debug, 1, MPI_INT, (rank - 1) % processes, 1, MPI_COMM_WORLD, &status);
+    }
+    for (int i = 0; i < size; i++) {
+        for (int k = 0; k < n; k++) {
+            fprintf(stdout, "%d ", matrix[i][k]);
+            fflush(stdout);
+        }
+        fprintf(stdout, "\n");
+        fflush(stdout);
+    }
+    if (processes > 1) MPI_Send(&debug, 1, MPI_INT, (rank + 1) % processes, 1, MPI_COMM_WORLD);
+    if(!rank){
+        fprintf(stdout,"VECTOR:\n");
+        for(int i = 0; i <m; i++)
+            fprintf(stdout,"%d ",vector[i]);
+        fprintf(stdout,"\n");
+    }
+#endif
 
     free(matrix),matrix=NULL;
     free(matrix_storage),matrix_storage=NULL;
