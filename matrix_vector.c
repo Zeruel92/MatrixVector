@@ -7,12 +7,16 @@
 #define BLOCK_SIZE(id, p, n) \
                      (BLOCK_HIGH(id,p,n)-BLOCK_LOW(id,p,n)+1)
 
+typedef struct {
+    int rows;
+    int cols;
+} matrix_dims_t;
 
 int main(int argc, char** argv){
     int processes, rank;
 
     FILE* matrix_file;
-    int n,m,size;
+    int size;
     int **matrix=NULL;
     int *matrix_storage=NULL;
     int *vector=NULL;
@@ -25,6 +29,8 @@ int main(int argc, char** argv){
     int *gather_counts=NULL;
     int *gather_displacements=NULL;
 
+    matrix_dims_t dims;
+
 #ifdef _DEBUG
     int debug =1;
 #endif
@@ -33,39 +39,52 @@ int main(int argc, char** argv){
     MPI_Comm_rank(MPI_COMM_WORLD,&rank);
     MPI_Comm_size(MPI_COMM_WORLD,&processes);
 
+    // Creating MPI Data Type for matrix dims
+    MPI_Datatype mpi_matrix_dims_t;
+    int lengths[2]={1,1};
+    MPI_Aint displacements[2];
+    MPI_Aint base_address;
+    MPI_Get_address(&dims, &base_address);
+    MPI_Get_address(&dims.rows,&displacements[0]);
+    MPI_Get_address(&dims.cols,&displacements[1]);
+    displacements[0] = MPI_Aint_diff(displacements[0],base_address);
+    displacements[1] = MPI_Aint_diff(displacements[1],base_address);
+    MPI_Datatype primitive_types[2] = {MPI_INT,MPI_INT};
+    MPI_Type_create_struct(2,lengths,displacements,primitive_types,&mpi_matrix_dims_t);
+    MPI_Type_commit(&mpi_matrix_dims_t);
+
     // Reading matrix size
     if (rank == (processes - 1)) {
         matrix_file = fopen("./matrix", "r");
-        fscanf(matrix_file, "%d", &m);
-        if (processes > m) {
+        fscanf(matrix_file, "%d", &dims.rows);
+        if (processes > dims.rows) {
             fprintf(stderr, "The number of processors exceed matrix dimensions\n");
             MPI_Abort(MPI_COMM_WORLD, -2);
         }
-        fscanf(matrix_file, "%d", &n);
+        fscanf(matrix_file, "%d", &dims.cols);
     }
-    MPI_Bcast(&m,1,MPI_INT,processes-1,MPI_COMM_WORLD);
-    MPI_Bcast(&n,1,MPI_INT,processes-1,MPI_COMM_WORLD);
+    MPI_Bcast(&dims,1,mpi_matrix_dims_t,processes-1,MPI_COMM_WORLD);
 
     //Preparing array
-    size = BLOCK_SIZE(rank, processes, m);
+    size = BLOCK_SIZE(rank, processes, dims.rows);
     matrix = (int **) malloc(size * sizeof(int *));
     if(matrix == NULL){
         fprintf(stderr, "Failed allocating matrix\n");
         MPI_Abort(MPI_COMM_WORLD, -1);
     }
 
-    matrix_storage = (int *) malloc(size*n*sizeof(int));
+    matrix_storage = (int *) malloc(size*dims.cols*sizeof(int));
     if(matrix_storage == NULL){
         fprintf(stderr, "Failed allocating matrix_storage\n");
         MPI_Abort(MPI_COMM_WORLD, -1);
     }
     for(int i=0; i<size; i++){
-        matrix[i] = &matrix_storage[i*n];
+        matrix[i] = &matrix_storage[i*dims.cols];
     }
 
-    vector = (int *) malloc(n* sizeof(int));
+    vector = (int *) malloc(dims.cols* sizeof(int));
     temp_vector = (int *) calloc(size,sizeof(int));
-    if(rank==processes-1) output_vector = (int *) malloc(m*sizeof(int));
+    if(rank==processes-1) output_vector = (int *) malloc(dims.rows*sizeof(int));
 
     //Preparing gather param array
 
@@ -73,28 +92,28 @@ int main(int argc, char** argv){
         gather_counts = (int *) malloc(processes*sizeof(int));
         gather_displacements = (int *) malloc(processes*sizeof(int));
         for(int i =0;i<processes;i++){
-            gather_counts[i]= BLOCK_SIZE(i,processes,m);
-            gather_displacements[i]= BLOCK_LOW(i,processes,m);
+            gather_counts[i]= BLOCK_SIZE(i,processes,dims.rows);
+            gather_displacements[i]= BLOCK_LOW(i,processes,dims.rows);
         }
     }
 
     //Loading array
     if(rank == processes-1){
         for(int i = 0; i < processes-1; i++) {
-            int local_size = BLOCK_SIZE(i, processes, m);
-            for (int j = 0; j < local_size * n; j++)
+            int local_size = BLOCK_SIZE(i, processes, dims.rows);
+            for (int j = 0; j < local_size * dims.cols; j++)
                 fscanf(matrix_file, "%d", &matrix_storage[j]);
-            if (processes > 1) MPI_Irsend(matrix_storage, local_size * n, MPI_INT, i, 0, MPI_COMM_WORLD, &request);
+            if (processes > 1) MPI_Irsend(matrix_storage, local_size * dims.cols, MPI_INT, i, 0, MPI_COMM_WORLD, &request);
         }
-        for (int i = 0; i < size * n; i++)
+        for (int i = 0; i < size * dims.cols; i++)
             fscanf(matrix_file, "%d", &matrix_storage[i]);
-        for (int i = 0; i < n; i++){
+        for (int i = 0; i < dims.cols; i++){
             fscanf(matrix_file, "%d", &vector[i]);
         }
     } else {
-        MPI_Recv(matrix_storage, size * n, MPI_INT, processes - 1, 0, MPI_COMM_WORLD, &status);
+        MPI_Recv(matrix_storage, size * dims.cols, MPI_INT, processes - 1, 0, MPI_COMM_WORLD, &status);
     }
-    MPI_Bcast(vector,n,MPI_INT,processes-1,MPI_COMM_WORLD);
+    MPI_Bcast(vector,dims.cols,MPI_INT,processes-1,MPI_COMM_WORLD);
 
 #ifdef _DEBUG
     if (!rank) {
@@ -104,7 +123,7 @@ int main(int argc, char** argv){
         MPI_Recv(&debug, 1, MPI_INT, (rank - 1) % processes, 1, MPI_COMM_WORLD, &status);
     }
     for (int i = 0; i < size; i++) {
-        for (int k = 0; k < n; k++) {
+        for (int k = 0; k < dims.cols; k++) {
             fprintf(stdout, "%d ", matrix[i][k]);
             fflush(stdout);
         }
@@ -114,7 +133,7 @@ int main(int argc, char** argv){
     if (processes > 1) MPI_Send(&debug, 1, MPI_INT, (rank + 1) % processes, 1, MPI_COMM_WORLD);
     if(!rank){
         fprintf(stdout,"VECTOR:\n");
-        for(int i = 0; i <n; i++)
+        for(int i = 0; i <dims.cols; i++)
             fprintf(stdout,"%d ",vector[i]);
         fprintf(stdout,"\n");
     }
@@ -124,7 +143,7 @@ int main(int argc, char** argv){
     elapsed=-MPI_Wtime();
     for (int iterations = 0; iterations < MAX_ITERATIONS; iterations++) {
         for(int i =0;i<size;i++){
-            for(int j=0; j<n; j++){
+            for(int j=0; j<dims.cols; j++){
                 temp_vector[i]+= matrix[i][j] * vector[j];
             }
         }
@@ -140,7 +159,7 @@ int main(int argc, char** argv){
 #ifdef _DEBUG
     if(rank == processes-1){
         fprintf(stdout,"VECTOR:\n");
-        for(int i = 0; i <m; i++)
+        for(int i = 0; i <dims.rows; i++)
             fprintf(stdout,"%d ",output_vector[i]);
         fprintf(stdout,"\n");
     }
